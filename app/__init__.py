@@ -1,34 +1,40 @@
 from flask import Flask, jsonify
-from .api.v1 import v1_blueprint
-from .extensions import JWTManager, limiter, db
+from .extensions import db, jwt
+from .auth import auth_blueprint
+from .habits import habits_blueprint
+from .errors import errors_blueprint
+from .models import TokenBlocklist
 
 
 def create_app(config):
-    # Initialize the Flask object
+    # Initialize the Flask app
     app = Flask(__name__)
 
-    # Configuration settings
+    # Load configuration settings
     app.config.from_object(config)
 
-    # Database initialization
+    # Set up the database
     db.init_app(app)
     with app.app_context():
         db.create_all()
 
-    # Initialize JWT Manager for handling JWTs
-    jwt = JWTManager(app)
+    # Set up JWT authentication
+    jwt.init_app(app)
 
-    # Initialize the limiter
-    limiter.init_app(app)
+    @jwt.token_in_blocklist_loader
+    def check_if_token_revoked(jwt_header, jwt_payload):
+        jti = jwt_payload["jti"]
+        token = db.session.query(TokenBlocklist.id).filter_by(jti=jti).scalar()
+        return token is not None
 
-    # Register the v1 blueprint
-    app.register_blueprint(v1_blueprint, url_prefix="/api/v1")
+    # Register blueprints with a shared URL prefix
+    app.register_blueprint(auth_blueprint, url_prefix="/api/v1")
+    app.register_blueprint(habits_blueprint, url_prefix="/api/v1")
+    app.register_blueprint(errors_blueprint)
 
-    # A simple Health Check route
-    # We put this here just to verify the factory works.
+    # Health check route — confirms the API is up and running
     @app.route("/health", methods=["GET"])
     def health_check():
         return jsonify(status="healthy", message="Habit Tracker API is running"), 200
 
-    # Return the app object
     return app
